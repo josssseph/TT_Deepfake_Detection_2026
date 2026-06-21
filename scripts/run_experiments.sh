@@ -24,37 +24,57 @@ TRAIN_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train
 VAL_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/val_indices.npy"
 CSV_FILE="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/resultados_tuning.csv"
 MODEL_DIR="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/models"
+
 mkdir -p "$MODEL_DIR"
 
 # 3. Parámetros base
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
+
 BASE_LR=1e-4
-BASE_BATCH=8
+BASE_BATCH=4
+BASE_WORKERS=2
 BASE_EPOCHS=30
 BASE_PATIENCE=10
+
 BASE_LSTM_HIDDEN=256
 BASE_LSTM_LAYERS=1
 BASE_SPECTRAL_HIDDEN=128
 
-# 4. ABLACIÓN DE RAMAS (frames=30, dct=1024)
+# ============================================================
+# FASE 1: ABLACIÓN DE RAMAS
+# ============================================================
+
 echo "========================================="
 echo "FASE 1: ABLACIÓN DE RAMAS"
 echo "========================================="
 
 for arch in spatial_only spectral_only spatial_spectral full_model; do
+
     echo "----- Entrenando $arch -----"
-    
+
     case $arch in
         spatial_only)
-            SPATIAL="--spatial"; SPECTRAL="--no_spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--no_spectral"
+            METRICS="--no_metrics"
+            ;;
         spectral_only)
-            SPATIAL="--no_spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--no_spatial"
+            SPECTRAL="--spectral"
+            METRICS="--no_metrics"
+            ;;
         spatial_spectral)
-            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--spectral"
+            METRICS="--no_metrics"
+            ;;
         full_model)
-            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--spectral"
+            METRICS="--metrics"
+            ;;
     esac
-    
+
     python "$BASE_SCRIPT" \
         --h5_path "$H5_PATH" \
         --train_idx "$TRAIN_IDX" \
@@ -66,22 +86,28 @@ for arch in spatial_only spectral_only spatial_spectral full_model; do
         --num_dct 1024 \
         --lr $BASE_LR \
         --batch_size $BASE_BATCH \
+        --num_workers $BASE_WORKERS \
         --epochs $BASE_EPOCHS \
         --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN \
         --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
         $SPATIAL $SPECTRAL $METRICS
+
 done
 
-# 5. TUNING DEL NÚMERO DE FRAMES (con modelo completo)
+# ============================================================
+# FASE 2: TUNING DEL NÚMERO DE FRAMES
+# ============================================================
+
 echo "========================================="
 echo "FASE 2: TUNING DE FRAMES"
 echo "========================================="
 
 for frames in 10 20 30 40 50 60; do
+
     echo "----- num_frames = $frames -----"
-    
+
     python "$BASE_SCRIPT" \
         --h5_path "$H5_PATH" \
         --train_idx "$TRAIN_IDX" \
@@ -93,22 +119,28 @@ for frames in 10 20 30 40 50 60; do
         --num_dct 1024 \
         --lr $BASE_LR \
         --batch_size $BASE_BATCH \
+        --num_workers $BASE_WORKERS \
         --epochs $BASE_EPOCHS \
         --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN \
         --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
         --spatial --spectral --metrics
+
 done
 
-# 6. TUNING DEL NÚMERO DE COEFICIENTES DCT (con modelo completo, frames=30)
+# ============================================================
+# FASE 3: TUNING DEL NÚMERO DE COEFICIENTES DCT
+# ============================================================
+
 echo "========================================="
 echo "FASE 3: TUNING DE COEFICIENTES DCT"
 echo "========================================="
 
 for dct in 256 512 1024 2048 4096; do
+
     echo "----- num_dct = $dct -----"
-    
+
     python "$BASE_SCRIPT" \
         --h5_path "$H5_PATH" \
         --train_idx "$TRAIN_IDX" \
@@ -120,12 +152,14 @@ for dct in 256 512 1024 2048 4096; do
         --num_dct $dct \
         --lr $BASE_LR \
         --batch_size $BASE_BATCH \
+        --num_workers $BASE_WORKERS \
         --epochs $BASE_EPOCHS \
         --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN \
         --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
         --spatial --spectral --metrics
+
 done
 
 echo "========================================="

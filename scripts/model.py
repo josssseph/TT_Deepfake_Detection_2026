@@ -60,11 +60,12 @@ class DeepfakeDetector(nn.Module):
             frame_actual = frames[:, t, :, :, :]
             frame_previo = frames[:, t-1, :, :, :]
             
-            ssim_val = ssim(frame_actual, frame_previo, data_range=1.0, reduction = 'none')
-            ssim_seq.append(ssim_val.view(B, 1).expand(B, 1))
+            # CORRECCIÓN: usar 'elementwise_mean' para obtener un escalar por par de frames
+            ssim_val = ssim(frame_actual, frame_previo, data_range=1.0, reduction='elementwise_mean')
+            ssim_seq.append(ssim_val.unsqueeze(1))    # (B,) -> (B,1)
             
             jitter_val = torch.mean(torch.abs(frame_actual - frame_previo), dim=[1, 2, 3])
-            jitter_seq.append(jitter_val.view(B, 1))
+            jitter_seq.append(jitter_val.unsqueeze(1))
             
         return torch.stack(ssim_seq, dim=1), torch.stack(jitter_seq, dim=1)
 

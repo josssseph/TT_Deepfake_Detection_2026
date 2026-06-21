@@ -86,12 +86,18 @@ val_idx   = np.load(args.val_idx)
 
 print(f"Videos de entrenamiento: {len(train_idx)} | Validación: {len(val_idx)}")
 
+# ### NUEVO: Determinar si necesitamos cargar los pesados tensores de imágenes
+need_frames = args.use_spatial or args.use_metrics
+
+# ### MODIFICADO: Pasar la bandera load_frames a los datasets
 train_dataset = DeepfakeHDF5Dataset(args.h5_path, train_idx,
                                     num_frames=args.num_frames,
-                                    num_dct=args.num_dct)
+                                    num_dct=args.num_dct,
+                                    load_frames=need_frames)
 val_dataset   = DeepfakeHDF5Dataset(args.h5_path, val_idx,
                                     num_frames=args.num_frames,
-                                    num_dct=args.num_dct)
+                                    num_dct=args.num_dct,
+                                    load_frames=need_frames)
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
                           num_workers=args.num_workers, pin_memory=True, persistent_workers=False)
@@ -117,21 +123,24 @@ model.use_spatial = args.use_spatial
 model.use_spectral = args.use_spectral
 model.use_metrics = args.use_metrics
 
-# ---- Forward modificado que respeta las flags ----
+# ### MODIFICADO: Forward adaptado para evitar errores de shape si los frames están vacíos
 def custom_forward(frames, dct_coeffs):
-    B, T, C, H, W = frames.shape
-    frames_reshaped = frames.view(B * T, C, H, W)
+    # Tomamos las dimensiones del batch (B) y tiempo (T) desde la DCT 
+    # ya que siempre estará presente, mientras que 'frames' puede venir vacío.
+    B, T, _ = dct_coeffs.shape
     
     # Rama espacial
     if model.use_spatial:
+        _, _, C, H, W = frames.shape
+        frames_reshaped = frames.view(B * T, C, H, W)
         spatial_feat = model.spatial_branch(frames_reshaped).view(B, T, 512)
     else:
         spatial_feat = torch.zeros(B, T, 512, device=device)
     
-    # Rama espectral (usamos el atributo guardado en model.spectral_hidden_dim)
+    # Rama espectral 
     if model.use_spectral:
-    	dct_flat = dct_coeffs.view(B * T, -1)
-    	spectral_feat = model.spectral_branch(dct_flat).view(B, T, model.spectral_hidden_dim)
+        dct_flat = dct_coeffs.view(B * T, -1)
+        spectral_feat = model.spectral_branch(dct_flat).view(B, T, model.spectral_hidden_dim)
     else:
         spectral_feat = torch.zeros(B, T, model.spectral_hidden_dim, device=device)
     
@@ -154,7 +163,7 @@ model.forward = custom_forward
 # 3. OPTIMIZADOR, LOSS (PESOS DE CLASE) Y MÉTRICAS
 # ============================================================
 with h5py.File(args.h5_path, 'r') as f:
-    train_labels = f['Y'][:]  # Cargar todas las etiquetas (3000,)
+    train_labels = f['Y'][:]  # Cargar todas las etiquetas
 train_labels = train_labels[train_idx]  # Filtrar por índices de entrenamiento
 
 n_real = np.sum(train_labels == 0)
@@ -190,7 +199,11 @@ for epoch in range(args.epochs):
     model.train()
     running_loss = 0.0
     for frames, dct, labels in train_loader:
-        frames, dct, labels = frames.to(device), dct.to(device), labels.to(device)
+        # Nota: Si load_frames=False, `frames` será un tensor vacío. Solo enviamos dct y labels a GPU
+        if frames.numel() > 0:
+            frames = frames.to(device)
+            
+        dct, labels = dct.to(device), labels.to(device)
 
         optimizer.zero_grad()
         with torch.amp.autocast('cuda', enabled=use_amp):
@@ -201,7 +214,7 @@ for epoch in range(args.epochs):
         scaler.step(optimizer)
         scaler.update()
 
-        running_loss += loss.item() * frames.size(0)
+        running_loss += loss.item() * dct.size(0) # Usamos dct.size(0) para el tamaño del batch
 
     epoch_train_loss = running_loss / len(train_dataset)
 
@@ -214,13 +227,16 @@ for epoch in range(args.epochs):
 
     with torch.no_grad():
         for frames, dct, labels in val_loader:
-            frames, dct, labels = frames.to(device), dct.to(device), labels.to(device)
+            if frames.numel() > 0:
+                frames = frames.to(device)
+                
+            dct, labels = dct.to(device), labels.to(device)
 
             with torch.amp.autocast('cuda', enabled=use_amp):
                 outputs = model(frames, dct)
                 loss = criterion(outputs, labels)
 
-            val_loss += loss.item() * frames.size(0)
+            val_loss += loss.item() * dct.size(0)
             probs = torch.softmax(outputs, dim=1)[:, 1]  # probabilidad de clase 1 (fake)
             acc_metric.update(probs, labels)
             recall_metric.update(probs, labels)
@@ -258,9 +274,12 @@ test_results = {}
 if args.test_idx is not None:
     print("\nEvaluando en conjunto de test...")
     test_idx = np.load(args.test_idx)
+    
+    # ### MODIFICADO: Pasar la bandera load_frames también al test
     test_dataset = DeepfakeHDF5Dataset(args.h5_path, test_idx,
                                        num_frames=args.num_frames,
-                                       num_dct=args.num_dct)
+                                       num_dct=args.num_dct,
+                                       load_frames=need_frames)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False,
                              num_workers=args.num_workers, pin_memory=True, persistent_workers=False)
     
@@ -275,11 +294,15 @@ if args.test_idx is not None:
     
     with torch.no_grad():
         for frames, dct, labels in test_loader:
-            frames, dct, labels = frames.to(device), dct.to(device), labels.to(device)
+            if frames.numel() > 0:
+                frames = frames.to(device)
+            dct, labels = dct.to(device), labels.to(device)
+            
             with torch.amp.autocast('cuda', enabled=use_amp):
                 outputs = model(frames, dct)
                 loss = criterion(outputs, labels)
-            test_loss += loss.item() * frames.size(0)
+            
+            test_loss += loss.item() * dct.size(0)
             probs = torch.softmax(outputs, dim=1)[:, 1]
             acc_metric.update(probs, labels)
             recall_metric.update(probs, labels)

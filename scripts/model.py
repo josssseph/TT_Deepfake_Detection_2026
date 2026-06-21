@@ -14,6 +14,10 @@ class DeepfakeDetector(nn.Module):
     ):
         super(DeepfakeDetector, self).__init__()
 
+        # Guardamos explícitamente la dimensión de salida de la rama espectral
+        # (necesario para train_tuning.py cuando se usa --no_spectral)
+        self.spectral_hidden_dim = spectral_hidden_dim
+
         # ==========================================
         # 1. RAMA ESPACIAL (ResNet18 Moderno)
         # ==========================================

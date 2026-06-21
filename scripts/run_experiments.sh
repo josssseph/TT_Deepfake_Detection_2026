@@ -31,8 +31,8 @@ mkdir -p "$MODEL_DIR"
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
 
 BASE_LR=1e-4
-BASE_BATCH=4
-BASE_WORKERS=2
+BASE_BATCH=8
+BASE_WORKERS=8
 BASE_EPOCHS=30
 BASE_PATIENCE=10
 

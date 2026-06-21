@@ -3,16 +3,26 @@ import torch.nn as nn
 from torchvision.models import resnet18, ResNet18_Weights
 from torchmetrics.functional.image import structural_similarity_index_measure as ssim
 
+
 class DeepfakeDetector(nn.Module):
-    def __init__(self, dct_input_dim=1024, spectral_hidden_dim=128, lstm_hidden=256):
+    def __init__(
+        self,
+        dct_input_dim=1024,
+        spectral_hidden_dim=128,
+        lstm_hidden=256,
+        lstm_layers=1
+    ):
         super(DeepfakeDetector, self).__init__()
-        
+
         # ==========================================
         # 1. RAMA ESPACIAL (ResNet18 Moderno)
         # ==========================================
-        # Usamos los pesos modernos tal como lo pide PyTorch 2.5+
-        self.spatial_branch = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        self.spatial_branch = resnet18(
+            weights=ResNet18_Weights.IMAGENET1K_V1
+        )
         self.spatial_branch.fc = nn.Identity()
+
+        # Congelar pesos de ResNet
         for param in self.spatial_branch.parameters():
             param.requires_grad = False
 
@@ -27,20 +37,20 @@ class DeepfakeDetector(nn.Module):
             nn.ReLU(),
             nn.Dropout(0.3)
         )
-        
+
         # ==========================================
         # 3. RAMA TEMPORAL (LSTM + Clasificador)
         # ==========================================
-        # 512 (Espacial) + 128 (Espectral) + 1 (SSIM) + 1 (Jitter) = 642
+        # 512 (Espacial) + spectral_hidden_dim + 1 (SSIM) + 1 (Jitter)
         input_features = 512 + spectral_hidden_dim + 2
-        
+
         self.lstm = nn.LSTM(
             input_size=input_features,
             hidden_size=lstm_hidden,
-            num_layers=1,
+            num_layers=lstm_layers,
             batch_first=True
         )
-        
+
         self.classifier = nn.Sequential(
             nn.Linear(lstm_hidden, 64),
             nn.ReLU(),
@@ -49,40 +59,85 @@ class DeepfakeDetector(nn.Module):
         )
 
     def extract_metrics(self, frames):
-        """Calcula el SSIM y el Jitter en la GPU/CPU"""
+        """
+        Calcula SSIM y Jitter para cada frame respecto al anterior.
+        """
         B, T, C, H, W = frames.shape
         device = frames.device
-        
+
         ssim_seq = [torch.ones(B, 1, device=device)]
         jitter_seq = [torch.zeros(B, 1, device=device)]
-        
+
         for t in range(1, T):
-            frame_actual = frames[:, t, :, :, :]
-            frame_previo = frames[:, t-1, :, :, :]
-            
-            # CORRECCIÓN: usar 'elementwise_mean' para obtener un escalar por par de frames
-            ssim_val = ssim(frame_actual, frame_previo, data_range=1.0, reduction='elementwise_mean')
-            ssim_seq.append(ssim_val.unsqueeze(1))    # (B,) -> (B,1)
-            
-            jitter_val = torch.mean(torch.abs(frame_actual - frame_previo), dim=[1, 2, 3])
+            frame_actual = frames[:, t]
+            frame_previo = frames[:, t - 1]
+
+            ssim_val = ssim(
+                frame_actual,
+                frame_previo,
+                data_range=1.0,
+                reduction="elementwise_mean"
+            )
+
+            ssim_seq.append(ssim_val.unsqueeze(1))
+
+            jitter_val = torch.mean(
+                torch.abs(frame_actual - frame_previo),
+                dim=[1, 2, 3]
+            )
+
             jitter_seq.append(jitter_val.unsqueeze(1))
-            
-        return torch.stack(ssim_seq, dim=1), torch.stack(jitter_seq, dim=1)
+
+        ssim_feat = torch.stack(ssim_seq, dim=1)
+        jitter_feat = torch.stack(jitter_seq, dim=1)
+
+        return ssim_feat, jitter_feat
 
     def forward(self, frames, dct_coeffs):
         B, T, C, H, W = frames.shape
+
+        # ==========================================
+        # Extracción espacial
+        # ==========================================
         frames_reshaped = frames.view(B * T, C, H, W)
-        
+
         spatial_feat = self.spatial_branch(frames_reshaped)
-        spatial_feat = spatial_feat.view(B, T, 512)     
+        spatial_feat = spatial_feat.view(B, T, 512)
+
+        # ==========================================
+        # Extracción espectral
+        # ==========================================
         spectral_feat = self.spectral_branch(dct_coeffs)
-        
-        ssim_feat, jitter_feat = self.extract_metrics(frames) 
-        
-        combined_features = torch.cat([spatial_feat, spectral_feat, ssim_feat, jitter_feat], dim=2)
-        
+
+        # ==========================================
+        # Métricas temporales
+        # ==========================================
+        ssim_feat, jitter_feat = self.extract_metrics(frames)
+
+        # ==========================================
+        # Fusión multimodal
+        # ==========================================
+        combined_features = torch.cat(
+            [
+                spatial_feat,
+                spectral_feat,
+                ssim_feat,
+                jitter_feat
+            ],
+            dim=2
+        )
+
+        # ==========================================
+        # LSTM
+        # ==========================================
         lstm_out, (hn, cn) = self.lstm(combined_features)
-        video_summary = hn[0] 
-        
-        logits = self.classifier(video_summary) 
+
+        # Tomar la última capa de la LSTM
+        video_summary = hn[-1]
+
+        # ==========================================
+        # Clasificación final
+        # ==========================================
+        logits = self.classifier(video_summary)
+
         return logits

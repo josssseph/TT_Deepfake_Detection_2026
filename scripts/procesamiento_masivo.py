@@ -3,22 +3,29 @@ import os
 import h5py
 import numpy as np
 from tqdm import tqdm
-from scipy.fftpack import dct          # <-- necesario para DCT 2D
+from scipy.fftpack import dct
 
-# --- 1. CONFIGURACIÓN DE RUTAS ABSOLUTAS ---
+# ============================================================
+# 1. CONFIGURACIÓN DE RUTAS ABSOLUTAS
+# ============================================================
 USER_HOME = '/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project'
 dataset_path = f'{USER_HOME}/data/raw/FaceForensics++_C23'
-output_h5 = f'{USER_HOME}/data/processed/ff_dataset_30frames.h5'
+output_h5 = f'{USER_HOME}/data/processed/ff_dataset_max60frames_4096dct.h5'  # NUEVO NOMBRE
 
 # Modelos DNN
 prototxt_path = f"{USER_HOME}/scripts/deploy.prototxt"
 caffemodel_path = f"{USER_HOME}/scripts/res10_300x300_ssd_iter_140000.caffemodel"
 net = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
 
-N_FRAMES = 30                # Muestreo uniforme según literatura
-N_DCT_COEFFS = 1024          # Número de coeficientes DCT a conservar por frame
+# ============================================================
+# PARÁMETROS MÁXIMOS (se pueden reducir después en el Dataset)
+# ============================================================
+MAX_FRAMES = 60                # Máximo de frames que vamos a guardar
+N_DCT_COEFFS_MAX = 4096        # Máximo de coeficientes DCT por frame
 
-# --- 2. FUNCIONES AUXILIARES ---
+# ============================================================
+# 2. FUNCIONES AUXILIARES (sin cambios salvo la DCT)
+# ============================================================
 
 def extraer_video_id(nombre_archivo, carpeta):
     """
@@ -56,37 +63,38 @@ def zigzag_indices(n):
                 j -= 1
     return indices
 
-# Precalcular índices zigzag para imagen 224x224 (se usa una sola vez)
+# Precalcular índices zigzag para imagen 224x224 (hasta el máximo que necesitemos)
 ZIGZAG_224 = zigzag_indices(224)
 
-def extraer_dct_frame(rostro_gray):
+def extraer_dct_frame(rostro_gray, num_coeffs):
     """
     Calcula la DCT 2D de la imagen en escala de grises (224x224),
-    y devuelve los primeros N_DCT_COEFFS coeficientes en orden zigzag.
+    y devuelve los primeros num_coeffs coeficientes en orden zigzag.
     
     Args:
         rostro_gray: numpy array (224, 224), valores float en [0,1].
+        num_coeffs: número de coeficientes a conservar.
     Returns:
-        numpy array de longitud N_DCT_COEFFS.
+        numpy array de longitud num_coeffs.
     """
     # Aplicar DCT 2D (norm='ortho' para mantener energía)
     dct_frame = dct(dct(rostro_gray.T, norm='ortho').T, norm='ortho')
-    # Recorrer en zigzag y tomar los primeros N_DCT_COEFFS
-    coefs = np.array([dct_frame[i, j] for i, j in ZIGZAG_224[:N_DCT_COEFFS]])
+    # Recorrer en zigzag y tomar los primeros num_coeffs
+    coefs = np.array([dct_frame[i, j] for i, j in ZIGZAG_224[:num_coeffs]])
     return coefs.astype('float32')
 
-# --- 3. FUNCIÓN DE PROCESAMIENTO (1 Video -> Tensor de 30 frames y sus DCT) ---
+# ============================================================
+# 3. FUNCIÓN DE PROCESAMIENTO (1 Vídeo → 60 frames + DCTs)
+# ============================================================
 def extraer_secuencia_rostros(ruta_video):
     cap = cv2.VideoCapture(ruta_video)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    if total_frames < N_FRAMES:
-        cap.release()
-        return None, None  # Ahora devolvemos dos valores
+    # Muestreo uniforme de MAX_FRAMES índices (aunque total_frames sea menor)
+    indices_muestreo = np.linspace(0, total_frames - 1, MAX_FRAMES, dtype=int)
     
-    indices_muestreo = np.linspace(0, total_frames - 1, N_FRAMES, dtype=int)
     secuencia_rostros = []
-    secuencia_dct = []      # <-- nueva lista para los vectores DCT
+    secuencia_dct = []
     
     for idx in indices_muestreo:
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
@@ -110,42 +118,57 @@ def extraer_secuencia_rostros(ruta_video):
             
             rostro = frame[y1:y2, x1:x2]
             if rostro.size != 0:
-                # Redimensionar y normalizar (Rostro RGB)
+                # Redimensionar y normalizar (se guarda en BGR, igual que antes)
                 rostro_224 = cv2.resize(rostro, (224, 224), interpolation=cv2.INTER_AREA)
                 rostro_norm = rostro_224.astype("float32") / 255.0
                 
-                # Convertir a escala de grises para DCT (usando ponderación estándar)
+                # Convertir a escala de grises para DCT
                 rostro_gray = (0.299 * rostro_norm[:,:,2] + 
                                0.587 * rostro_norm[:,:,1] + 
                                0.114 * rostro_norm[:,:,0])  # BGR -> Gris
                 
-                # Extraer coeficientes DCT
-                dct_features = extraer_dct_frame(rostro_gray)
+                # Extraer los coeficientes DCT (hasta N_DCT_COEFFS_MAX)
+                dct_features = extraer_dct_frame(rostro_gray, N_DCT_COEFFS_MAX)
                 
                 secuencia_rostros.append(rostro_norm)
                 secuencia_dct.append(dct_features)
     
     cap.release()
     
-    if len(secuencia_rostros) == N_FRAMES and len(secuencia_dct) == N_FRAMES:
-        return (np.array(secuencia_rostros),   # (30, 224, 224, 3)
-                np.array(secuencia_dct))       # (30, 1024)
-    return None, None
+    # -----------------------------------------------
+    # 4. POSTPROCESADO: PADDING HASTA MAX_FRAMES
+    # -----------------------------------------------
+    if len(secuencia_rostros) == 0:
+        # Si no se detectó ningún rostro en toda la secuencia, descartamos
+        return None, None
+    
+    # Si tenemos menos de MAX_FRAMES, rellenamos con el último rostro válido
+    while len(secuencia_rostros) < MAX_FRAMES:
+        secuencia_rostros.append(secuencia_rostros[-1])
+        secuencia_dct.append(secuencia_dct[-1])
+    
+    # Si por alguna razón tenemos más de MAX_FRAMES (no debería), truncamos
+    secuencia_rostros = secuencia_rostros[:MAX_FRAMES]
+    secuencia_dct = secuencia_dct[:MAX_FRAMES]
+    
+    return (np.array(secuencia_rostros),   # (60, 224, 224, 3)
+            np.array(secuencia_dct))       # (60, 4096)
 
-# --- 4. ESCRITURA PROGRESIVA EN HDF5 ---
+# ============================================================
+# 5. ESCRITURA PROGRESIVA EN HDF5
+# ============================================================
 with h5py.File(output_h5, 'w') as h5f:
-    # Datasets existentes
+    # Datasets con las dimensiones máximas
     dset_x = h5f.create_dataset('X', 
-                                shape=(0, N_FRAMES, 224, 224, 3), 
-                                maxshape=(None, N_FRAMES, 224, 224, 3), 
+                                shape=(0, MAX_FRAMES, 224, 224, 3), 
+                                maxshape=(None, MAX_FRAMES, 224, 224, 3), 
                                 dtype='float32', chunks=True)
     dset_y = h5f.create_dataset('Y', shape=(0,), maxshape=(None,), dtype='int8')
     dset_id = h5f.create_dataset('video_id', shape=(0,), maxshape=(None,), dtype='int16')
     
-    # NUEVO dataset para los coeficientes DCT
     dset_dct = h5f.create_dataset('X_dct',
-                                  shape=(0, N_FRAMES, N_DCT_COEFFS),
-                                  maxshape=(None, N_FRAMES, N_DCT_COEFFS),
+                                  shape=(0, MAX_FRAMES, N_DCT_COEFFS_MAX),
+                                  maxshape=(None, MAX_FRAMES, N_DCT_COEFFS_MAX),
                                   dtype='float32', chunks=True)
     
     def procesar_carpeta(carpeta, etiqueta):
@@ -159,15 +182,15 @@ with h5py.File(output_h5, 'w') as h5f:
             ruta_completa = os.path.join(directorio, video)
             tensor_video, tensor_dct = extraer_secuencia_rostros(ruta_completa)
             
-            if tensor_video is not None:
+            if tensor_video is not None:   # solo si se detectó al menos un rostro
                 vid = extraer_video_id(video, carpeta)
                 curr_size = dset_x.shape[0]
                 
                 # Agrandar todos los datasets en 1
-                dset_x.resize((curr_size + 1, N_FRAMES, 224, 224, 3))
+                dset_x.resize((curr_size + 1, MAX_FRAMES, 224, 224, 3))
                 dset_y.resize((curr_size + 1,))
                 dset_id.resize((curr_size + 1,))
-                dset_dct.resize((curr_size + 1, N_FRAMES, N_DCT_COEFFS))
+                dset_dct.resize((curr_size + 1, MAX_FRAMES, N_DCT_COEFFS_MAX))
                 
                 # Escribir
                 dset_x[curr_size] = tensor_video
@@ -180,4 +203,4 @@ with h5py.File(output_h5, 'w') as h5f:
     procesar_carpeta('Deepfakes', etiqueta=1)
     procesar_carpeta('Face2Face', etiqueta=1)
 
-print("\n¡Proceso Masivo Completado!")
+print("\nProcesamiento Masivo Completado")

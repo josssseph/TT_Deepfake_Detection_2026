@@ -4,7 +4,8 @@ from sklearn.model_selection import train_test_split
 from collections import defaultdict
 import os
 
-h5_path = '/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_30frames.h5'
+#h5_path = '/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_30frames.h5'
+h5_path = '/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5'
 save_dir = '/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/'
 
 print("Abriendo dataset HDF5...")

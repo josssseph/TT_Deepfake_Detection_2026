@@ -38,19 +38,27 @@ class DeepfakeHDF5Dataset(Dataset):
         dct = torch.from_numpy(dct_selected).float()
         label = torch.tensor(y_label, dtype=torch.long)
         
-        # 2. Lectura Contigua de Imágenes (Solución al 0% de GPU)
+        # 2. Lectura Eficiente de Imágenes (Evitando OOM)
         if self.load_frames:
-            # Leemos TODOS los frames de un solo golpe (1 sola operación de disco)
-            # Esto es muchísimo más rápido que pedir índices salteados al HDF5
-            x_all = self.h5_file['X'][real_idx]
+            # En lugar de cargar TODO el video a la RAM (x_all = h5_file['X'][real_idx])
+            # Le pedimos a h5py que nos traiga SOLO los frames que necesitamos.
+            # h5py requiere que los índices estén en una lista ordenada
+            indices_ordenados = np.sort(indices_frames).tolist()
             
-            # Submuestreamos usando numpy en la memoria ultra-rápida
-            x_selected = x_all[indices_frames]
+            # Leemos solo los frames necesarios directamente del disco
+            x_selected = self.h5_file['X'][real_idx, indices_ordenados]
             
+            # x_selected ahora tiene forma (num_frames_necesarios, 224, 224, 3)
+            # Reordenamos si los índices originales no estaban ordenados (poco probable, pero seguro)
+            if not np.array_equal(indices_frames, indices_ordenados):
+                # Encontramos la posición original de los índices ordenados
+                mapping = {val: i for i, val in enumerate(indices_ordenados)}
+                reorder_idx = [mapping[val] for val in indices_frames]
+                x_selected = x_selected[reorder_idx]
+
             x_rgb = x_selected[..., ::-1].copy()
             frames = torch.from_numpy(x_rgb).float()
             frames = frames.permute(0, 3, 1, 2)
         else:
-            frames = torch.empty(0)
-            
+            frames = torch.empty(0)            
         return frames, dct, label

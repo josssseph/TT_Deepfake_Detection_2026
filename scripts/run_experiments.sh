@@ -18,8 +18,22 @@ echo "========================================="
 module load python/3.11
 source ~/deepfake_project/env_df/bin/activate
 
+# ====================================================================
+# TRUCO HPC: MOVER DATOS AL DISCO LOCAL (SSD) DEL NODO
+# ====================================================================
+LOCAL_DIR="/tmp/joseph_deepfake_$SLURM_JOB_ID"
+mkdir -p "$LOCAL_DIR"
+
+echo "Copiando dataset masivo (111GB) al disco SSD local del nodo ($LOCAL_DIR)..."
+echo "Esto tomará unos minutos, ten paciencia..."
+cp /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5 "$LOCAL_DIR/"
+
+# AHORA APUNTAMOS LA RUTA H5 AL DISCO LOCAL
+H5_PATH="$LOCAL_DIR/ff_dataset_max60frames_4096dct.h5"
+echo "Copia finalizada. ¡Iniciando entrenamiento a máxima velocidad!"
+# ====================================================================
+
 # 2. Rutas fijas
-H5_PATH="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5"
 TRAIN_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_indices.npy"
 VAL_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/val_indices.npy"
 CSV_FILE="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/resultados_tuning.csv"
@@ -31,8 +45,8 @@ mkdir -p "$MODEL_DIR"
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
 
 BASE_LR=1e-4
-BASE_BATCH=8
-BASE_WORKERS=8
+BASE_BATCH=8       # Subido para exprimir la A100
+BASE_WORKERS=4     # Subido para procesar datos más rápido
 BASE_EPOCHS=30
 BASE_PATIENCE=10
 
@@ -41,38 +55,33 @@ BASE_LSTM_LAYERS=1
 BASE_SPECTRAL_HIDDEN=128
 
 # ============================================================
-# FASE 1: ABLACIÓN DE RAMAS
+# FASE 1: ABLACIÓN DE RAMAS (COMPLETA PARA LA TESIS)
 # ============================================================
 
 echo "========================================="
 echo "FASE 1: ABLACIÓN DE RAMAS"
 echo "========================================="
 
-for arch in spatial_only spectral_only spatial_spectral full_model; do
+# Añadidas las 3 nuevas combinaciones estructurales
+for arch in spatial_only spectral_only structural_only spatial_spectral spatial_structural spectral_structural full_model; do
 
     echo "----- Entrenando $arch -----"
 
     case $arch in
         spatial_only)
-            SPATIAL="--spatial"
-            SPECTRAL="--no_spectral"
-            METRICS="--no_metrics"
-            ;;
+            SPATIAL="--spatial"; SPECTRAL="--no_spectral"; METRICS="--no_metrics" ;;
         spectral_only)
-            SPATIAL="--no_spatial"
-            SPECTRAL="--spectral"
-            METRICS="--no_metrics"
-            ;;
+            SPATIAL="--no_spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+        structural_only)
+            SPATIAL="--no_spatial"; SPECTRAL="--no_spectral"; METRICS="--metrics" ;;
         spatial_spectral)
-            SPATIAL="--spatial"
-            SPECTRAL="--spectral"
-            METRICS="--no_metrics"
-            ;;
+            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+        spatial_structural)
+            SPATIAL="--spatial"; SPECTRAL="--no_spectral"; METRICS="--metrics" ;;
+        spectral_structural)
+            SPATIAL="--no_spatial"; SPECTRAL="--spectral"; METRICS="--metrics" ;;
         full_model)
-            SPATIAL="--spatial"
-            SPECTRAL="--spectral"
-            METRICS="--metrics"
-            ;;
+            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--metrics" ;;
     esac
 
     python "$BASE_SCRIPT" \
@@ -80,8 +89,8 @@ for arch in spatial_only spectral_only spatial_spectral full_model; do
         --train_idx "$TRAIN_IDX" \
         --val_idx "$VAL_IDX" \
         --results_csv "$CSV_FILE" \
-        --exp_name "$arch" \
-        --save_model "$MODEL_DIR/${arch}.pth" \
+        --exp_name "fase1_$arch" \
+        --save_model "$MODEL_DIR/fase1_${arch}.pth" \
         --num_frames 30 \
         --num_dct 1024 \
         --lr $BASE_LR \
@@ -113,8 +122,8 @@ for frames in 10 20 30 40 50 60; do
         --train_idx "$TRAIN_IDX" \
         --val_idx "$VAL_IDX" \
         --results_csv "$CSV_FILE" \
-        --exp_name "frames_${frames}" \
-        --save_model "$MODEL_DIR/frames_${frames}.pth" \
+        --exp_name "fase2_frames_${frames}" \
+        --save_model "$MODEL_DIR/fase2_frames_${frames}.pth" \
         --num_frames $frames \
         --num_dct 1024 \
         --lr $BASE_LR \
@@ -146,8 +155,8 @@ for dct in 256 512 1024 2048 4096; do
         --train_idx "$TRAIN_IDX" \
         --val_idx "$VAL_IDX" \
         --results_csv "$CSV_FILE" \
-        --exp_name "dct_${dct}" \
-        --save_model "$MODEL_DIR/dct_${dct}.pth" \
+        --exp_name "fase3_dct_${dct}" \
+        --save_model "$MODEL_DIR/fase3_dct_${dct}.pth" \
         --num_frames 30 \
         --num_dct $dct \
         --lr $BASE_LR \
@@ -163,6 +172,8 @@ for dct in 256 512 1024 2048 4096; do
 done
 
 echo "========================================="
+echo "LIMPIANDO DISCO LOCAL..."
+rm -rf "$LOCAL_DIR"
 echo "TODOS LOS EXPERIMENTOS FINALIZADOS"
 echo "Fecha: $(date)"
 echo "========================================="

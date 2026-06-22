@@ -16,13 +16,13 @@ class DeepfakeHDF5Dataset(Dataset):
         return len(self.indices)
 
     def __getitem__(self, idx):
-        # rdcc_nbytes=0 apaga el caché de HDF5, previniendo fugas de RAM en HPC
         if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, 'r', rdcc_nbytes=0)
+            # swmr=True ayuda a múltiples workers a leer sin bloquearse
+            self.h5_file = h5py.File(self.h5_path, 'r', swmr=True, rdcc_nbytes=0)
             
         real_idx = self.indices[idx]
         
-        # 1. Leer SIEMPRE los coeficientes DCT (Son minúsculos en RAM)
+        # 1. Leer DCT y label
         dct_all = self.h5_file['X_dct'][real_idx]
         y_label = self.h5_file['Y'][real_idx]
         
@@ -38,17 +38,19 @@ class DeepfakeHDF5Dataset(Dataset):
         dct = torch.from_numpy(dct_selected).float()
         label = torch.tensor(y_label, dtype=torch.long)
         
-        # 2. Leer las imágenes SOLO si la arquitectura actual las necesita
+        # 2. Lectura Contigua de Imágenes (Solución al 0% de GPU)
         if self.load_frames:
-            # h5py lee mucho más rápido si le pasamos una lista ordenada de índices
-            idx_sorted = np.sort(indices_frames).tolist()
-            x_selected = self.h5_file['X'][real_idx, idx_sorted]
+            # Leemos TODOS los frames de un solo golpe (1 sola operación de disco)
+            # Esto es muchísimo más rápido que pedir índices salteados al HDF5
+            x_all = self.h5_file['X'][real_idx]
+            
+            # Submuestreamos usando numpy en la memoria ultra-rápida
+            x_selected = x_all[indices_frames]
             
             x_rgb = x_selected[..., ::-1].copy()
             frames = torch.from_numpy(x_rgb).float()
             frames = frames.permute(0, 3, 1, 2)
         else:
-            # Si es spectral_only, devolvemos un tensor vacío para no romper el unpacking
             frames = torch.empty(0)
             
         return frames, dct, label

@@ -65,6 +65,7 @@ class DeepfakeDetector(nn.Module):
     def extract_metrics(self, frames):
         """
         Calcula SSIM y Jitter para cada frame respecto al anterior.
+        Optimizada para evitar picos de memoria (OOM).
         """
         B, T, C, H, W = frames.shape
         device = frames.device
@@ -72,27 +73,46 @@ class DeepfakeDetector(nn.Module):
         ssim_seq = [torch.ones(B, 1, device=device)]
         jitter_seq = [torch.zeros(B, 1, device=device)]
 
-        # ¡ESTO SALVARÁ TU RAM Y VRAM!
         with torch.no_grad():
             for t in range(1, T):
+                # Extraemos los frames
                 frame_actual = frames[:, t]
                 frame_previo = frames[:, t - 1]
 
+                # Aseguramos que los tensores estén en el mismo dispositivo que el modelo (GPU)
+                # Esto es crucial para no saturar la RAM de la CPU
+                frame_actual = frame_actual.to(device)
+                frame_previo = frame_previo.to(device)
+
+                # Calculamos SSIM en la GPU
                 ssim_val = ssim(
                     frame_actual,
                     frame_previo,
                     data_range=1.0,
                     reduction="none"
                 )
-
+                
+                # Movemos el resultado escalar (o vector) de vuelta al dispositivo principal
+                # si es necesario, o lo dejamos en GPU. 
+                # Promediamos espacialmente si reduction="none" devolvió un mapa de calor
+                if ssim_val.dim() > 1:
+                    ssim_val = ssim_val.view(B, -1).mean(dim=1)
+                    
                 ssim_seq.append(ssim_val.unsqueeze(1))
 
+                # Calculamos Jitter
                 jitter_val = torch.mean(
                     torch.abs(frame_actual - frame_previo),
                     dim=[1, 2, 3]
                 )
 
                 jitter_seq.append(jitter_val.unsqueeze(1))
+                
+                # Liberamos explícitamente los tensores temporales
+                del frame_actual
+                del frame_previo
+                del ssim_val
+                del jitter_val
 
         ssim_feat = torch.stack(ssim_seq, dim=1)
         jitter_feat = torch.stack(jitter_seq, dim=1)

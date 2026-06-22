@@ -18,35 +18,32 @@ echo "========================================="
 module load python/3.11
 source ~/deepfake_project/env_df/bin/activate
 
-# ====================================================================
-# TRUCO HPC: MOVER DATOS AL DISCO LOCAL (SSD) DEL NODO
-# ====================================================================
-LOCAL_DIR="/tmp/joseph_deepfake_$SLURM_JOB_ID"
-mkdir -p "$LOCAL_DIR"
+# ============================================================
+# 2. RUTAS FIJAS
+# ============================================================
 
-echo "Copiando dataset masivo (111GB) al disco SSD local del nodo ($LOCAL_DIR)..."
-echo "Esto tomará unos minutos, ten paciencia..."
-cp /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5 "$LOCAL_DIR/"
+H5_PATH="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5"
 
-# AHORA APUNTAMOS LA RUTA H5 AL DISCO LOCAL
-H5_PATH="$LOCAL_DIR/ff_dataset_max60frames_4096dct.h5"
-echo "Copia finalizada. ¡Iniciando entrenamiento a máxima velocidad!"
-# ====================================================================
-
-# 2. Rutas fijas
 TRAIN_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_indices.npy"
 VAL_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/val_indices.npy"
+
 CSV_FILE="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/resultados_tuning.csv"
 MODEL_DIR="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/models"
 
 mkdir -p "$MODEL_DIR"
 
-# 3. Parámetros base
+# ============================================================
+# 3. PARÁMETROS BASE
+# ============================================================
+
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
 
 BASE_LR=1e-4
-BASE_BATCH=4       # Subido para exprimir la A100
-BASE_WORKERS=4     # Subido para procesar datos más rápido
+
+# La A100 tiene VRAM suficiente
+BASE_BATCH=8
+
+BASE_WORKERS=4
 BASE_EPOCHS=30
 BASE_PATIENCE=10
 
@@ -55,33 +52,53 @@ BASE_LSTM_LAYERS=1
 BASE_SPECTRAL_HIDDEN=128
 
 # ============================================================
-# FASE 1: ABLACIÓN DE RAMAS (COMPLETA PARA LA TESIS)
+# FASE 1: ABLACIÓN DE RAMAS
 # ============================================================
 
 echo "========================================="
 echo "FASE 1: ABLACIÓN DE RAMAS"
 echo "========================================="
 
-# Añadidas las 3 nuevas combinaciones estructurales
 for arch in spatial_only spectral_only structural_only spatial_spectral spatial_structural spectral_structural full_model; do
 
     echo "----- Entrenando $arch -----"
 
     case $arch in
         spatial_only)
-            SPATIAL="--spatial"; SPECTRAL="--no_spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--no_spectral"
+            METRICS="--no_metrics"
+            ;;
         spectral_only)
-            SPATIAL="--no_spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--no_spatial"
+            SPECTRAL="--spectral"
+            METRICS="--no_metrics"
+            ;;
         structural_only)
-            SPATIAL="--no_spatial"; SPECTRAL="--no_spectral"; METRICS="--metrics" ;;
+            SPATIAL="--no_spatial"
+            SPECTRAL="--no_spectral"
+            METRICS="--metrics"
+            ;;
         spatial_spectral)
-            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--no_metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--spectral"
+            METRICS="--no_metrics"
+            ;;
         spatial_structural)
-            SPATIAL="--spatial"; SPECTRAL="--no_spectral"; METRICS="--metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--no_spectral"
+            METRICS="--metrics"
+            ;;
         spectral_structural)
-            SPATIAL="--no_spatial"; SPECTRAL="--spectral"; METRICS="--metrics" ;;
+            SPATIAL="--no_spatial"
+            SPECTRAL="--spectral"
+            METRICS="--metrics"
+            ;;
         full_model)
-            SPATIAL="--spatial"; SPECTRAL="--spectral"; METRICS="--metrics" ;;
+            SPATIAL="--spatial"
+            SPECTRAL="--spectral"
+            METRICS="--metrics"
+            ;;
     esac
 
     python "$BASE_SCRIPT" \
@@ -106,7 +123,7 @@ for arch in spatial_only spectral_only structural_only spatial_spectral spatial_
 done
 
 # ============================================================
-# FASE 2: TUNING DEL NÚMERO DE FRAMES
+# FASE 2: TUNING DE FRAMES
 # ============================================================
 
 echo "========================================="
@@ -139,7 +156,7 @@ for frames in 10 20 30 40 50 60; do
 done
 
 # ============================================================
-# FASE 3: TUNING DEL NÚMERO DE COEFICIENTES DCT
+# FASE 3: TUNING DE COEFICIENTES DCT
 # ============================================================
 
 echo "========================================="
@@ -172,8 +189,6 @@ for dct in 256 512 1024 2048 4096; do
 done
 
 echo "========================================="
-echo "LIMPIANDO DISCO LOCAL..."
-rm -rf "$LOCAL_DIR"
 echo "TODOS LOS EXPERIMENTOS FINALIZADOS"
 echo "Fecha: $(date)"
 echo "========================================="

@@ -80,7 +80,7 @@ class DeepfakeDetector(nn.Module):
                 frame_actual,
                 frame_previo,
                 data_range=1.0,
-                reduction="elementwise_mean"
+                reduction="none"
             )
 
             ssim_seq.append(ssim_val.unsqueeze(1))

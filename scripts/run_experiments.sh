@@ -45,7 +45,7 @@ mkdir -p "$MODEL_DIR"
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
 
 BASE_LR=1e-4
-BASE_BATCH=8       # Subido para exprimir la A100
+BASE_BATCH=4       # Subido para exprimir la A100
 BASE_WORKERS=4     # Subido para procesar datos más rápido
 BASE_EPOCHS=30
 BASE_PATIENCE=10

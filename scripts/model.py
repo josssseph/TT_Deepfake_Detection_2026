@@ -72,25 +72,27 @@ class DeepfakeDetector(nn.Module):
         ssim_seq = [torch.ones(B, 1, device=device)]
         jitter_seq = [torch.zeros(B, 1, device=device)]
 
-        for t in range(1, T):
-            frame_actual = frames[:, t]
-            frame_previo = frames[:, t - 1]
+        # ¡ESTO SALVARÁ TU RAM Y VRAM!
+        with torch.no_grad():
+            for t in range(1, T):
+                frame_actual = frames[:, t]
+                frame_previo = frames[:, t - 1]
 
-            ssim_val = ssim(
-                frame_actual,
-                frame_previo,
-                data_range=1.0,
-                reduction="none"
-            )
+                ssim_val = ssim(
+                    frame_actual,
+                    frame_previo,
+                    data_range=1.0,
+                    reduction="none"
+                )
 
-            ssim_seq.append(ssim_val.unsqueeze(1))
+                ssim_seq.append(ssim_val.unsqueeze(1))
 
-            jitter_val = torch.mean(
-                torch.abs(frame_actual - frame_previo),
-                dim=[1, 2, 3]
-            )
+                jitter_val = torch.mean(
+                    torch.abs(frame_actual - frame_previo),
+                    dim=[1, 2, 3]
+                )
 
-            jitter_seq.append(jitter_val.unsqueeze(1))
+                jitter_seq.append(jitter_val.unsqueeze(1))
 
         ssim_feat = torch.stack(ssim_seq, dim=1)
         jitter_feat = torch.stack(jitter_seq, dim=1)

@@ -251,6 +251,11 @@ for epoch in range(args.epochs):
     print(f"Época [{epoch+1}/{args.epochs}] - {end_time-start_time:.1f}s")
     print(f"  Train Loss: {epoch_train_loss:.4f}")
     print(f"  Val   Loss: {epoch_val_loss:.4f} | Acc: {epoch_val_acc:.4f} | Recall: {epoch_val_recall:.4f} | AUC: {epoch_val_auc:.4f}")
+    
+    # NUEVO: Imprimir consumo de memoria de la GPU
+    if torch.cuda.is_available():
+        print(f"  GPU Peak Memory: {torch.cuda.max_memory_allocated()/1024**3:.2f} GB")
+        torch.cuda.reset_peak_memory_stats()
 
     # Early stopping basado en Recall
     if epoch_val_recall > best_val_recall:

@@ -41,9 +41,9 @@ BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/tra
 BASE_LR=1e-4
 
 # La A100 tiene VRAM suficiente
-BASE_BATCH=8
+BASE_BATCH=4
 
-BASE_WORKERS=4
+BASE_WORKERS=0
 BASE_EPOCHS=30
 BASE_PATIENCE=10
 

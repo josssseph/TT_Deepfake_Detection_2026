@@ -3,10 +3,12 @@
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --mem=100G
-#SBATCH --time=48:00:00
+#SBATCH --mem=64G
+#SBATCH --time=24:00:00
 #SBATCH -o /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/logs/tuning_%j.out
 #SBATCH -e /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/logs/tuning_%j.err
+
+set -euo pipefail
 
 echo "========================================="
 echo "INICIANDO EXPERIMENTOS DE TUNING"
@@ -18,35 +20,25 @@ echo "========================================="
 module load python/3.11
 source ~/deepfake_project/env_df/bin/activate
 
-# ============================================================
-# 2. COPIAR HDF5 AL DISCO LOCAL DEL NODO (evita atasco de red)
-# ============================================================
-LOCAL_DIR="/tmp/joseph_deepfake_$SLURM_JOB_ID"
-mkdir -p "$LOCAL_DIR"
-
-echo "Copiando dataset (111 GB) a disco local del nodo ($LOCAL_DIR)..."
-cp /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_dataset_max60frames_4096dct.h5 "$LOCAL_DIR/"
-echo "Copia finalizada. Entrenando desde disco local."
-
-H5_PATH="$LOCAL_DIR/ff_dataset_max60frames_4096dct.h5"
+# 2. Rutas fijas (USAMOS EL HDF5 PRECOMPUTADO)
+H5_PATH="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/data/processed/ff_features_precomputed.h5"
 TRAIN_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_indices.npy"
 VAL_IDX="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/val_indices.npy"
 CSV_FILE="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/resultados_tuning.csv"
 MODEL_DIR="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/models"
 mkdir -p "$MODEL_DIR"
 
-# ============================================================
-# 3. PARÁMETROS BASE (sin workers, batch pequeño)
-# ============================================================
+# 3. Parámetros base (más agresivos porque todo es ligero)
 BASE_SCRIPT="/home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/scripts/train_tuning.py"
 BASE_LR=1e-4
-BASE_BATCH=4
-BASE_WORKERS=0
+BASE_BATCH=64          # los tensores son pequeños, podemos subir el batch
+BASE_WORKERS=4
 BASE_EPOCHS=30
 BASE_PATIENCE=10
 BASE_LSTM_HIDDEN=256
 BASE_LSTM_LAYERS=1
 BASE_SPECTRAL_HIDDEN=128
+BASE_EARLY_METRIC="auc"  # usamos AUC para early stopping
 
 # ============================================================
 # FASE 1: ABLACIÓN DE RAMAS
@@ -86,6 +78,7 @@ for arch in spatial_only spectral_only structural_only spatial_spectral spatial_
         --epochs $BASE_EPOCHS --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
+        --early_stop_metric $BASE_EARLY_METRIC \
         $SPATIAL $SPECTRAL $METRICS
 done
 
@@ -109,6 +102,7 @@ for frames in 10 20 30 40 50 60; do
         --epochs $BASE_EPOCHS --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
+        --early_stop_metric $BASE_EARLY_METRIC \
         --spatial --spectral --metrics
 done
 
@@ -132,11 +126,10 @@ for dct in 256 512 1024 2048 4096; do
         --epochs $BASE_EPOCHS --patience $BASE_PATIENCE \
         --lstm_hidden $BASE_LSTM_HIDDEN --lstm_layers $BASE_LSTM_LAYERS \
         --spectral_hidden_dim $BASE_SPECTRAL_HIDDEN \
+        --early_stop_metric $BASE_EARLY_METRIC \
         --spatial --spectral --metrics
 done
 
-# Limpiar disco local
-rm -rf "$LOCAL_DIR"
 echo "========================================="
 echo "TODOS LOS EXPERIMENTOS FINALIZADOS"
 echo "Fecha: $(date)"

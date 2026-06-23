@@ -3,7 +3,7 @@
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --mem=64G
+#SBATCH --mem=96G
 #SBATCH --time=24:00:00
 #SBATCH -o /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/logs/tuning_%j.out
 #SBATCH -e /home/joseph.jaramillo__ucuenca.edu.ec/deepfake_project/logs/tuning_%j.err

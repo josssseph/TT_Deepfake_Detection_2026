@@ -103,9 +103,9 @@ val_dataset = DeepfakeHDF5Dataset(
 )
 
 train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
-                          num_workers=args.num_workers, pin_memory=True, persistent_workers=False)
+                          num_workers=args.num_workers, pin_memory=False, persistent_workers=False)
 val_loader   = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False,
-                          num_workers=args.num_workers, pin_memory=True, persistent_workers=False)
+                          num_workers=args.num_workers, pin_memory=False, persistent_workers=False)
 
 # ============================================================
 # 2. CONSTRUCCIÓN DEL MODELO LIGERO
@@ -294,7 +294,7 @@ if args.test_idx is not None:
         load_metrics=args.use_metrics
     )
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False,
-                             num_workers=args.num_workers, pin_memory=True, persistent_workers=False)
+                             num_workers=args.num_workers, pin_memory=False, persistent_workers=False)
 
     model.load_state_dict(torch.load(args.save_model, map_location=device))
     model.eval()

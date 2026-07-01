@@ -1,0 +1,16 @@
+REPORTE DE CLASIFICACIÓN (TEST SET)
+=========================================
+              precision    recall  f1-score   support
+
+    Real (0)     0.6981    0.7400    0.7184       150
+    Fake (1)     0.8660    0.8400    0.8528       300
+
+    accuracy                         0.8067       450
+   macro avg     0.7820    0.7900    0.7856       450
+weighted avg     0.8100    0.8067    0.8080       450
+
+Configuración del modelo evaluado:
+- Pesos: ft_spatial_spectral_bs64_lr1e-5_wd1e-3.pth
+- Frames: 50
+- DCT: 256
+- Umbral de decisión: 0.333

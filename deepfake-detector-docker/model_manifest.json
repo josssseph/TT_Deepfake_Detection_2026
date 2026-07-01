@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "checkpoint": {
+    "path": "models/finetuned/ft_spatial_spectral_bs64_lr1e-5_wd1e-3.pth",
+    "sha256": "2e98aa22f0cb8b3011782c687209386768db0e1bd445c674087bfc6d61bdfffa"
+  },
+  "face_detector": {
+    "prototxt": "assets/face_detector/deploy.prototxt",
+    "prototxt_sha256": "dcd661dc48fc9de0a341db1f666a2164ea63a67265c7f779bc12d6b3f2fa67e9",
+    "weights": "assets/face_detector/res10_300x300_ssd_iter_140000.caffemodel",
+    "weights_sha256": "2a56a11a57a4a295956b0660b4a3d76bbdca2206c4961cea8efe7d95c7cb2f2d"
+  },
+  "backbone": {
+    "architecture": "resnet18",
+    "weights": "IMAGENET1K_V1",
+    "apply_imagenet_normalization": false
+  },
+  "model": {
+    "base_frames": 60,
+    "num_frames": 50,
+    "image_size": 224,
+    "num_dct": 256,
+    "face_confidence": 0.5,
+    "threshold": 0.333,
+    "positive_class": "Fake",
+    "negative_class": "Real",
+    "spatial_dim": 512,
+    "spectral_dim": 128,
+    "lstm_hidden": 256,
+    "use_spatial": true,
+    "use_spectral": true,
+    "use_metrics": false
+  }
+}

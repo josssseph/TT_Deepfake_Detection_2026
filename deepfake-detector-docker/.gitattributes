@@ -1,0 +1,4 @@
+* text=auto eol=lf
+*.pth binary
+*.caffemodel binary
+*.mp4 binary
